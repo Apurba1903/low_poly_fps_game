@@ -22,6 +22,7 @@ from .world import (
 )
 
 MAX_PER_TEAM = 7
+MAX_PLAYERS = MAX_PER_TEAM * 2
 MAX_HP = 100
 DAMAGE = 25
 HEADSHOT_MULT = 1.5
@@ -46,6 +47,9 @@ HEAL_RADIUS = 1.0
 HEAL_RESPAWN = 15.0  # seconds before a taken heart reappears somewhere else
 
 TEAMS = ("A", "B")
+TEAM_DEATHMATCH = "team_deathmatch"
+FREE_FOR_ALL = "free_for_all"
+GAME_MODES = (TEAM_DEATHMATCH, FREE_FOR_ALL)
 
 
 @dataclass
@@ -125,6 +129,7 @@ class Game:
 
     world: World
     phase: str = "lobby"
+    mode: str = TEAM_DEATHMATCH
     duration: float = 300.0
     ends_at: float = 0.0
     scores: dict[str, int] = field(default_factory=lambda: {"A": 0, "B": 0})
@@ -147,10 +152,13 @@ class Game:
         return "A" if self.team_count("A") <= self.team_count("B") else "B"
 
     def add_player(self, name: str, team: str | None) -> Player | None:
-        """Create a player; returns ``None`` if the requested team is full."""
+        """Create a player, respecting the active mode's player limit."""
         if team not in TEAMS:
             team = self.smallest_team()
-        if self.team_count(team) >= MAX_PER_TEAM:
+        if self.mode == FREE_FOR_ALL:
+            if len(self.players) >= MAX_PLAYERS:
+                return None
+        elif self.team_count(team) >= MAX_PER_TEAM:
             return None
         pid = self._next_pid
         self._next_pid += 1
@@ -196,6 +204,21 @@ class Game:
         the time (and whenever the base is unsafe, i.e. being camped) it's a random safe
         cell on the team's side of the map. If nothing is safe, take the least-exposed spot.
         """
+        if self.mode == FREE_FOR_ALL:
+            others = [(q.x, q.z) for q in self.players.values() if q is not p and q.alive]
+            cells = self.world.open_cells
+            if not others:
+                return random.choice(cells)  # noqa: S311
+            best, best_score = cells[0], (False, -math.inf)
+            for c in random.sample(cells, min(len(cells), SPAWN_CANDIDATES)):
+                nearest = min(math.hypot(c[0] - x, c[1] - z) for x, z in others)
+                hidden = not any(self.world.can_see(c[0], c[1], x, z) for x, z in others)
+                if hidden and nearest >= SPAWN_SAFE_DIST:
+                    return c
+                if (hidden, nearest) > best_score:
+                    best, best_score = c, (hidden, nearest)
+            return best
+
         base = self.world.spawns[p.team]
         mates = [(q.x, q.z) for q in self.players.values() if q.team == p.team and q is not p and q.alive]
         enemies = [] if at_base else [(q.x, q.z) for q in self.players.values() if q.team != p.team and q.alive]
@@ -220,7 +243,11 @@ class Game:
         return best
 
     # ------------------------------------------------------------ match
-    def start(self, duration: float) -> None:
+    def start(self, duration: float, mode: str | None = None) -> None:
+        if mode is not None:
+            if mode not in GAME_MODES:
+                raise ValueError(f"unknown game mode: {mode}")
+            self.mode = mode
         self.duration = duration
         self.phase = "playing"
         self.ends_at = time.monotonic() + duration
@@ -230,7 +257,7 @@ class Game:
         for p in self.players.values():
             p.kills = p.deaths = 0
             self.spawn(p, at_base=True)
-        self.events.append({"e": "start", "duration": duration})
+        self.events.append({"e": "start", "duration": duration, "mode": self.mode})
 
     def reset(self) -> None:
         self.phase = "lobby"
@@ -316,7 +343,7 @@ class Game:
         best_t = min(max_t, self.world.ray_vs_world(ox, oy, oz, dx, dy, dz))
         victim: Player | None = None
         for p in self.players.values():
-            if p.pid == attacker.pid or p.team == attacker.team or not p.alive:
+            if p.pid == attacker.pid or not self._are_enemies(attacker, p) or not p.alive:
                 continue
             t = ray_vs_aabb(ox, oy, oz, dx, dy, dz, *p.hitbox(pad))
             if t is not None and t < best_t:
@@ -324,7 +351,7 @@ class Game:
         return (ox, oy, oz), (dx, dy, dz), best_t, victim
 
     def try_fire(self, shooter: Player, now: float) -> None:
-        if self.phase != "playing" or now < shooter.next_fire:
+        if now < shooter.next_fire:
             return
         if shooter.reloading:
             return
@@ -341,26 +368,28 @@ class Game:
 
         (ox, oy, oz), (dx, dy, dz), best_t, victim = self._trace(shooter, MAX_RANGE)
         hit_y = oy + dy * best_t
+        hit_id = victim.pid if (victim and self.phase == "playing") else 0
         self.events.append(
             {
                 "e": "shot",
                 "id": shooter.pid,
                 "to": [round(ox + dx * best_t, 2), round(hit_y, 2), round(oz + dz * best_t, 2)],
-                "hit": victim.pid if victim else 0,
+                "hit": hit_id,
             }
         )
-        if victim is None:
+        if self.phase != "playing" or victim is None:
             return
         headshot = hit_y > victim.y + body_height(victim.crouch) - HEAD_SIZE
         self.damage(shooter, victim, int(DAMAGE * (HEADSHOT_MULT if headshot else 1.0)), "hs" if headshot else "rifle")
 
     def try_knife(self, attacker: Player, now: float) -> None:
-        if self.phase != "playing" or now < attacker.next_knife:
+        if now < attacker.next_knife:
             return
         attacker.next_knife = now + KNIFE_INTERVAL
         _, _, _, victim = self._trace(attacker, KNIFE_RANGE, pad=KNIFE_PAD)
-        self.events.append({"e": "slash", "id": attacker.pid, "hit": victim.pid if victim else 0})
-        if victim is None:
+        hit_id = victim.pid if (victim and self.phase == "playing") else 0
+        self.events.append({"e": "slash", "id": attacker.pid, "hit": hit_id})
+        if self.phase != "playing" or victim is None:
             return
         # Behind = the attacker is on the far side of the way the victim is facing.
         fx, fz = -math.sin(victim.yaw), -math.cos(victim.yaw)
@@ -382,7 +411,8 @@ class Game:
         victim.deaths += 1
         victim.respawn_at = time.monotonic() + RESPAWN_TIME
         killer.kills += 1
-        self.scores[killer.team] += 1
+        if self.mode == TEAM_DEATHMATCH:
+            self.scores[killer.team] += 1
         self.events.append(
             {"e": "kill", "k": killer.name, "kt": killer.team, "v": victim.name, "vt": victim.team, "w": how}
         )
@@ -405,12 +435,16 @@ class Game:
     # ------------------------------------------------------------ visibility
     def _update_sight(self, now: float) -> None:
         """Record which living enemy pairs currently have line of sight."""
-        team_a = [p for p in self.players.values() if p.team == "A" and p.alive]
-        team_b = [p for p in self.players.values() if p.team == "B" and p.alive]
-        for a in team_a:
-            for b in team_b:
+        alive = [p for p in self.players.values() if p.alive]
+        for i, a in enumerate(alive):
+            for b in alive[i + 1 :]:
+                if not self._are_enemies(a, b):
+                    continue
                 if self.world.can_see(a.x, a.z, b.x, b.z):
                     self._seen[_pair(a.pid, b.pid)] = now
+
+    def _are_enemies(self, a: Player, b: Player) -> bool:
+        return self.mode == FREE_FOR_ALL or a.team != b.team
 
     def _forget_sight(self, pid: int) -> None:
         for key in [k for k in self._seen if pid in k]:
@@ -425,8 +459,11 @@ class Game:
         return [
             p
             for p in self.players.values()
-            if p.team == viewer.team
-            or (p.alive and now - self._seen.get(_pair(viewer.pid, p.pid), -math.inf) <= SIGHT_GRACE)
+            if p.pid == viewer.pid
+            or (
+                not self._are_enemies(viewer, p)
+                or (p.alive and now - self._seen.get(_pair(viewer.pid, p.pid), -math.inf) <= SIGHT_GRACE)
+            )
         ]
 
     # ------------------------------------------------------------ snapshots
@@ -440,6 +477,7 @@ class Game:
         return {
             "t": "state",
             "phase": self.phase,
+            "mode": self.mode,
             "left": round(self.time_left(), 1),
             "scores": self.scores,
             "roster": [[p.pid, p.name, p.team, p.kills, p.deaths] for p in self.players.values()],
@@ -495,6 +533,7 @@ def admin_status(game: Game) -> dict[str, Any]:
     """Status payload for the admin panel."""
     return {
         "phase": game.phase,
+        "mode": game.mode,
         "map": game.world.name,
         "left": round(game.time_left()),
         "scores": game.scores,

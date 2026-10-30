@@ -136,8 +136,14 @@ async def main():
     post("/admin/api/reset", {})
     s = await latest(a); assert s["phase"] == "lobby"; print("reset ok")
 
+    post("/admin/api/start", {"map": "duel", "mode": "free_for_all", "duration": 45})
+    s = await latest(a)
+    assert s["mode"] == "free_for_all" and get("/admin/api/status")["mode"] == "free_for_all", s
+    print("free-for-all mode selection ok")
+    post("/admin/api/reset", {})
+
     # Switch to the split map: a wall separates the teams, so neither may see the other.
-    post("/admin/api/start", {"map": "split", "duration": 45})
+    post("/admin/api/start", {"map": "split", "mode": "team_deathmatch", "duration": 45})
     msgs = []; dl = time.monotonic() + 0.4
     while time.monotonic() < dl:
         try: msgs.append(json.loads(await asyncio.wait_for(a.recv(), timeout=0.3)))

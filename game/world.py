@@ -188,6 +188,7 @@ class World:
             step = speed * dt / length
             x = self._resolve_axis(x + mx * step, z, y, axis="x")
             z = self._resolve_axis(x, z + mz * step, y, axis="z")
+        prev_y = y
         ground = self._support(x, z, y)
         if y <= ground + STEP_EPS:
             y = ground
@@ -195,6 +196,7 @@ class World:
         if vy != 0.0 or y > ground:
             vy -= GRAVITY * dt
             y += vy * dt
+            ground = self._support(x, z, y, prev_y=prev_y)
             if y <= ground:
                 y, vy = ground, 0.0
         return x, y, z, vy
@@ -215,12 +217,13 @@ class World:
             return min(max(x, r), self.width - r)
         return min(max(z, r), self.depth - r)
 
-    def _support(self, x: float, z: float, y: float) -> float:
+    def _support(self, x: float, z: float, y: float, prev_y: float | None = None) -> float:
         """Height of the highest box top under the player that the feet are at or above (else 0)."""
         r = PLAYER_RADIUS
+        ref_y = max(y, prev_y) if prev_y is not None else y
         top = 0.0
         for b in self.boxes:
-            if top < b.h <= y + STEP_EPS and not (x + r <= b.x0 or x - r >= b.x1 or z + r <= b.z0 or z - r >= b.z1):
+            if top < b.h <= ref_y + STEP_EPS and not (x + r <= b.x0 or x - r >= b.x1 or z + r <= b.z0 or z - r >= b.z1):
                 top = b.h
         return top
 
