@@ -31,13 +31,18 @@ document.querySelectorAll(".teams button").forEach((b) => b.addEventListener("cl
 ui.name.value = localStorage.getItem("fps_name") || "";
 ui.name.addEventListener("keydown", (e) => { if (e.key === "Enter") ui.go.click(); });
 ui.go.addEventListener("click", () => {
+  ensureAudio();
   const name = ui.name.value.trim();
   if (!name) { ui.err.textContent = "Enter a name first."; return; }
   localStorage.setItem("fps_name", name);
   ui.go.disabled = true; ui.err.textContent = "";
   connect(name, chosenTeam === "auto" ? null : chosenTeam);
 });
-ui.lobbybar.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => send({ t: "team", team: b.dataset.team })));
+ui.lobbybar.querySelectorAll("button").forEach((b) => {
+  if (b.dataset.team) b.addEventListener("click", () => send({ t: "team", team: b.dataset.team }));
+});
+const startBtn = $("startbtn");
+if (startBtn) startBtn.addEventListener("click", () => fetch("/api/start", { method: "POST" }));
 
 // ----------------------------------------------------------------- three setup
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -199,11 +204,12 @@ function resolveAxis(x, z, y, axis) {
   if (axis === "x") return Math.min(Math.max(x, r), mapW - r);
   return Math.min(Math.max(z, r), mapD - r);
 }
-function support(x, z, y) {
+function support(x, z, y, prevY) {
   const r = PLAYER_RADIUS;
+  const refY = prevY !== undefined ? Math.max(y, prevY) : y;
   let top = 0;
   for (const b of boxes) {
-    if (top < b[4] && b[4] <= y + STEP_EPS && !(x + r <= b[0] || x - r >= b[2] || z + r <= b[1] || z - r >= b[3])) top = b[4];
+    if (top < b[4] && b[4] <= refY + STEP_EPS && !(x + r <= b[0] || x - r >= b[2] || z + r <= b[1] || z - r >= b[3])) top = b[4];
   }
   return top;
 }
@@ -222,7 +228,8 @@ function moveLocal(s, yaw, keys, dt) {
     s.x = resolveAxis(s.x + mx * step, s.z, s.y, "x");
     s.z = resolveAxis(s.x, s.z + mz * step, s.y, "z");
   }
-  const ground = support(s.x, s.z, s.y);
+  const prevY = s.y;
+  let ground = support(s.x, s.z, s.y);
   if (s.y <= ground + STEP_EPS) {
     s.y = ground;
     s.vy = (keys & KEY.JUMP) && !crouch ? JUMP_SPEED : 0;
@@ -230,6 +237,7 @@ function moveLocal(s, yaw, keys, dt) {
   if (s.vy !== 0 || s.y > ground) {
     s.vy -= GRAVITY * dt;
     s.y += s.vy * dt;
+    ground = support(s.x, s.z, s.y, prevY);
     if (s.y <= ground) { s.y = ground; s.vy = 0; }
   }
 }
@@ -238,6 +246,7 @@ function moveLocal(s, yaw, keys, dt) {
 let ws = null, myId = 0, myTeam = null, lastRoster = [], me = { x: 0, y: 0, z: 0, vy: 0, yaw: 0, pitch: 0, alive: true, hp: 100, ammo: 30 };
 let phase = "lobby", seq = 0, pending = [], keys = 0, mouseDown = false, reloadQueued = false, acc = 0, lastT = 0;
 let weapon = RIFLE, eye = EYE_HEIGHT, swing = 0, reloading = false;
+let crouchToggle = false, ctrlHeld = false, lastKnifeSwing = 0;
 const remotes = new Map();       // pid -> {group, name, team, mat, label}
 let snaps = [];                  // [{t, players: Map}]
 let hitMarkUntil = 0, flashUntil = 0, recoil = 0, feedTimer = [];
@@ -352,13 +361,26 @@ function makeRemote(name, team) {
   visor.position.set(0, 1.58, -0.17);
   const rifle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.6), new THREE.MeshStandardMaterial({ color: 0x2a2d33 }));
   rifle.position.set(0.22, 1.2, -0.3);
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.05, 0.3), new THREE.MeshStandardMaterial({ color: 0xd8dde3, metalness: 0.9, roughness: 0.3 }));
-  blade.position.set(0.25, 1.15, -0.3); blade.visible = false;
-  // Everything but the name tag goes in `model` so crouching can squash it.
-  const model = new THREE.Group(); model.add(body, head, visor, rifle, blade); group.add(model);
+
+  // Detailed knife model for remotes (blade, guard, grip)
+  const bladeGroup = new THREE.Group();
+  const bladeMesh = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.05, 0.28), new THREE.MeshStandardMaterial({ color: 0xd8dde3, metalness: 0.9, roughness: 0.25 }));
+  bladeMesh.position.set(0, 0, -0.14);
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.02), new THREE.MeshStandardMaterial({ color: 0x2a2d33 }));
+  guard.position.set(0, 0, 0);
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.045, 0.12), new THREE.MeshStandardMaterial({ color: 0x3b2a1c }));
+  handle.position.set(0, 0, 0.07);
+  bladeGroup.add(bladeMesh, guard, handle);
+  bladeGroup.position.set(0.22, 1.15, -0.25);
+  bladeGroup.visible = false;
+
+  const model = new THREE.Group();
+  model.add(body, head, visor, rifle, bladeGroup);
+  group.add(model);
+
   const label = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, transparent: true }));
   label.position.y = 2.15; label.scale.set(1.6, 0.4, 1); group.add(label);
-  const r = { group, model, rifle, blade, name, team, mat, label, setLabel: null };
+  const r = { group, model, body, head, visor, rifle, blade: bladeGroup, swing: 0, name, team, mat, label, setLabel: null };
   r.setLabel = (n, t) => {
     const c = document.createElement("canvas"); c.width = 256; c.height = 64; const g = c.getContext("2d");
     g.fillStyle = "rgba(0,0,0,.45)"; g.roundRect(0, 8, 256, 48, 12); g.fill();
@@ -372,7 +394,7 @@ function makeRemote(name, team) {
   return r;
 }
 
-function updateRemotes(now) {
+function updateRemotes(now, dt) {
   const t = now - INTERP_DELAY;
   let a = null, b = null;
   for (let i = snaps.length - 1; i >= 0; i--) { if (snaps[i].t <= t) { a = snaps[i]; b = snaps[i + 1] || null; break; } }
@@ -391,10 +413,22 @@ function updateRemotes(now) {
     }
     r.group.visible = !!p[8];
     r.group.position.set(x, y, z); r.group.rotation.y = yaw;
-    r.model.scale.y = p[12] ? 1.2 / 1.8 : 1;      // crouched hitbox is 1.2 m
-    r.label.position.y = p[12] ? 1.55 : 2.15;
-    r.rifle.visible = p[13] !== KNIFE; r.blade.visible = p[13] === KNIFE;
-    r.rifle.rotation.x = pitch; r.blade.rotation.x = pitch;
+    const isCrouched = !!p[12];
+    r.body.scale.y = isCrouched ? 0.65 : 1.0;
+    r.body.position.y = isCrouched ? 0.55 : 0.85;
+    r.head.position.y = isCrouched ? 1.05 : 1.55;
+    r.visor.position.y = isCrouched ? 1.08 : 1.58;
+    r.label.position.y = isCrouched ? 1.55 : 2.15;
+    r.rifle.visible = p[13] !== KNIFE;
+    r.blade.visible = p[13] === KNIFE;
+    r.rifle.position.y = isCrouched ? 0.75 : 1.2;
+    r.rifle.rotation.x = pitch;
+    if (r.blade.visible) {
+      r.swing = Math.max(0, (r.swing || 0) - (dt || 0.016) * 4);
+      const s = Math.sin(r.swing * Math.PI);
+      r.blade.position.set(0.22 - s * 0.12, (isCrouched ? 0.7 : 1.15) + s * 0.05, -0.25 - s * 0.2);
+      r.blade.rotation.set(pitch - s * 0.6, s * 0.5, s * 0.4);
+    }
   }
 }
 
@@ -420,13 +454,25 @@ function onShot(e, players) {
 const KILL_ICON = { rifle: "☠", hs: "🎯", knife: "🔪", back: "🔪💀" };
 function onSlash(e, players) {
   let d = 0;
-  if (e.id === myId) swing = 1;
-  else { const p = players.get(e.id); if (!p) return; d = Math.hypot(p[3] - me.x, p[4] - me.z); }
-  playSwish(Math.max(0.1, 1 - d / 25), !!e.hit);
+  if (e.id === myId) {
+    swing = Math.max(swing, 0.7);
+    if (e.hit) {
+      hitMarkUntil = performance.now() + 110;
+      playSwish(0.6, true);
+    }
+  } else {
+    const p = players ? players.get(e.id) : null;
+    if (!p) return;
+    d = Math.hypot(p[3] - me.x, p[4] - me.z);
+    playSwish(Math.max(0.1, 1 - d / 25), !!e.hit);
+    const r = remotes.get(e.id);
+    if (r) r.swing = 1;
+  }
 }
 function playSwish(vol, hit) {
   try {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    ensureAudio();
+    if (!actx) return;
     const n = actx.sampleRate * 0.18, buf = actx.createBuffer(1, n, actx.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.sin(Math.PI * i / n);
     const src = actx.createBufferSource(); src.buffer = buf;
@@ -439,12 +485,28 @@ function renderAmmo() {
   if (weapon === KNIFE) ui.ammo.innerHTML = `🔪 <small>KNIFE</small>`;
   else ui.ammo.innerHTML = reloading ? `<small>RELOADING</small>` : `${me.ammo} <small>/ 30</small>`;
 }
-function setWeapon(w) { if (w !== weapon) { weapon = w; swing = 0; renderAmmo(); } }
+function setWeapon(w) {
+  if (w !== weapon) {
+    weapon = w;
+    swing = 0;
+    renderAmmo();
+    const s1 = $("slot-rifle"), s2 = $("slot-knife");
+    if (s1) s1.classList.toggle("active", weapon === RIFLE);
+    if (s2) s2.classList.toggle("active", weapon === KNIFE);
+  }
+}
 
 let actx = null;
+function ensureAudio() {
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === "suspended") actx.resume();
+  } catch { /* audio is optional */ }
+}
 function playShot(vol) {
   try {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    ensureAudio();
+    if (!actx) return;
     const n = actx.sampleRate * 0.12, buf = actx.createBuffer(1, n, actx.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3);
     const src = actx.createBufferSource(); src.buffer = buf;
@@ -457,21 +519,37 @@ function playShot(vol) {
 // ----------------------------------------------------------------- input
 addEventListener("keydown", (e) => {
   if (ui.join.style.display !== "none") return;
+  ensureAudio();
   if (["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
+  if (e.ctrlKey && (e.code === "KeyW" || e.code === "KeyS" || e.code === "KeyA" || e.code === "KeyD")) e.preventDefault();
   if (e.code === "Tab") { e.preventDefault(); ui.score.classList.add("on"); renderScore(lastRoster); }
   if (e.code === "KeyW" || e.code === "ArrowUp") keys |= KEY.W;
   if (e.code === "KeyS" || e.code === "ArrowDown") keys |= KEY.S;
   if (e.code === "KeyA" || e.code === "ArrowLeft") keys |= KEY.A;
   if (e.code === "KeyD" || e.code === "ArrowRight") keys |= KEY.D;
   if (e.code === "ShiftLeft" || e.code === "ShiftRight") keys |= KEY.SPRINT;
-  if (e.code === "Space") { e.preventDefault(); keys |= KEY.JUMP; }
-  if (e.code === "KeyC") keys |= KEY.CROUCH;   // not Ctrl: Ctrl+W would close the tab
-  if (e.code === "KeyR") reloadQueued = true;
-  if (e.code === "Digit1") setWeapon(RIFLE);
-  if (e.code === "Digit2") setWeapon(KNIFE);
-  if (e.code === "KeyQ") setWeapon(weapon === RIFLE ? KNIFE : RIFLE);
+  if (e.code === "Space") {
+    e.preventDefault();
+    crouchToggle = false;
+    ctrlHeld = false;
+    keys &= ~KEY.CROUCH;
+    keys |= KEY.JUMP;
+  }
+  if (e.code === "ControlLeft" || e.code === "ControlRight" || e.key === "Control") {
+    ctrlHeld = true;
+    keys |= KEY.CROUCH;
+  }
+  if (e.code === "KeyC" || e.key === "c" || e.key === "C") {
+    crouchToggle = !crouchToggle;
+    if (crouchToggle) keys |= KEY.CROUCH;
+    else if (!ctrlHeld) keys &= ~KEY.CROUCH;
+  }
+  if (e.code === "KeyR" || e.key === "r" || e.key === "R") reloadQueued = true;
+  if (e.code === "Digit1" || e.code === "Numpad1" || e.key === "1") setWeapon(RIFLE);
+  if (e.code === "Digit2" || e.code === "Numpad2" || e.key === "2") setWeapon(KNIFE);
+  if (e.code === "KeyQ" || e.key === "q" || e.key === "Q") setWeapon(weapon === RIFLE ? KNIFE : RIFLE);
 });
-addEventListener("wheel", (e) => { if (document.pointerLockElement === renderer.domElement && e.deltaY) setWeapon(weapon === RIFLE ? KNIFE : RIFLE); });
+addEventListener("wheel", (e) => { if (e.deltaY) setWeapon(weapon === RIFLE ? KNIFE : RIFLE); });
 addEventListener("keyup", (e) => {
   if (e.code === "Tab") ui.score.classList.remove("on");
   if (e.code === "KeyW" || e.code === "ArrowUp") keys &= ~KEY.W;
@@ -480,15 +558,20 @@ addEventListener("keyup", (e) => {
   if (e.code === "KeyD" || e.code === "ArrowRight") keys &= ~KEY.D;
   if (e.code === "ShiftLeft" || e.code === "ShiftRight") keys &= ~KEY.SPRINT;
   if (e.code === "Space") keys &= ~KEY.JUMP;
-  if (e.code === "KeyC") keys &= ~KEY.CROUCH;
+  if (e.code === "ControlLeft" || e.code === "ControlRight" || e.key === "Control") {
+    ctrlHeld = false;
+    if (!crouchToggle) keys &= ~KEY.CROUCH;
+  }
 });
-addEventListener("blur", () => { keys = 0; mouseDown = false; });
+addEventListener("blur", () => { keys = 0; crouchToggle = false; ctrlHeld = false; mouseDown = false; });
 const lock = () => {
+  ensureAudio();
   renderer.domElement.focus();
   renderer.domElement.requestPointerLock();
 };
 ui.clickhint.addEventListener("click", lock);
 renderer.domElement.addEventListener("mousedown", (e) => {
+  ensureAudio();
   if (document.pointerLockElement !== renderer.domElement) { lock(); return; }
   if (e.button === 0) mouseDown = true;
 });
@@ -497,7 +580,7 @@ addEventListener("contextmenu", (e) => e.preventDefault());
 document.addEventListener("pointerlockchange", () => {
   const locked = document.pointerLockElement === renderer.domElement;
   ui.clickhint.classList.toggle("hidden", locked || ui.join.style.display !== "none");
-  if (!locked) { keys = 0; mouseDown = false; }
+  if (!locked) { keys = 0; crouchToggle = false; ctrlHeld = false; mouseDown = false; }
 });
 addEventListener("mousemove", (e) => {
   if (document.pointerLockElement !== renderer.domElement) return;
@@ -509,9 +592,14 @@ addEventListener("mousemove", (e) => {
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now; acc += dt;
+  if (weapon === KNIFE && mouseDown && me.alive && now >= lastKnifeSwing + 500) {
+    lastKnifeSwing = now;
+    swing = 1;
+    playSwish(0.35, false);
+  }
   while (acc >= STEP) {
     acc -= STEP;
-    const inp = { t: "in", s: ++seq, k: keys, y: round(me.yaw), p: round(me.pitch), dt: STEP, w: weapon, f: mouseDown && me.alive && phase === "playing" };
+    const inp = { t: "in", s: ++seq, k: keys, y: round(me.yaw), p: round(me.pitch), dt: STEP, w: weapon, f: mouseDown && me.alive };
     if (reloadQueued) { inp.r = true; reloadQueued = false; }
     if (me.alive) moveLocal(me, me.yaw, keys, STEP);
     pending.push(inp); if (pending.length > 240) pending.shift();
@@ -536,7 +624,7 @@ function frame(now) {
   flash.visible = now < flashUntil;
   ui.cross.classList.toggle("hit", now < hitMarkUntil);
   for (let i = tracers.length - 1; i >= 0; i--) if (now > tracers[i].until) { scene.remove(tracers[i].line); tracers[i].line.geometry.dispose(); tracers.splice(i, 1); }
-  updateRemotes(now);
+  updateRemotes(now, dt);
   animateHearts(now);
   drawMinimap();
   renderer.render(scene, camera);
