@@ -324,7 +324,7 @@ class Game:
         return (ox, oy, oz), (dx, dy, dz), best_t, victim
 
     def try_fire(self, shooter: Player, now: float) -> None:
-        if self.phase != "playing" or now < shooter.next_fire:
+        if now < shooter.next_fire:
             return
         if shooter.reloading:
             return
@@ -341,26 +341,28 @@ class Game:
 
         (ox, oy, oz), (dx, dy, dz), best_t, victim = self._trace(shooter, MAX_RANGE)
         hit_y = oy + dy * best_t
+        hit_id = victim.pid if (victim and self.phase == "playing") else 0
         self.events.append(
             {
                 "e": "shot",
                 "id": shooter.pid,
                 "to": [round(ox + dx * best_t, 2), round(hit_y, 2), round(oz + dz * best_t, 2)],
-                "hit": victim.pid if victim else 0,
+                "hit": hit_id,
             }
         )
-        if victim is None:
+        if self.phase != "playing" or victim is None:
             return
         headshot = hit_y > victim.y + body_height(victim.crouch) - HEAD_SIZE
         self.damage(shooter, victim, int(DAMAGE * (HEADSHOT_MULT if headshot else 1.0)), "hs" if headshot else "rifle")
 
     def try_knife(self, attacker: Player, now: float) -> None:
-        if self.phase != "playing" or now < attacker.next_knife:
+        if now < attacker.next_knife:
             return
         attacker.next_knife = now + KNIFE_INTERVAL
         _, _, _, victim = self._trace(attacker, KNIFE_RANGE, pad=KNIFE_PAD)
-        self.events.append({"e": "slash", "id": attacker.pid, "hit": victim.pid if victim else 0})
-        if victim is None:
+        hit_id = victim.pid if (victim and self.phase == "playing") else 0
+        self.events.append({"e": "slash", "id": attacker.pid, "hit": hit_id})
+        if self.phase != "playing" or victim is None:
             return
         # Behind = the attacker is on the far side of the way the victim is facing.
         fx, fz = -math.sin(victim.yaw), -math.cos(victim.yaw)
