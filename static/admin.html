@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FPS Clash · Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --a: #ff5c5c; --b: #4da3ff; --ink: #e8ecf1; --dim: #9aa4b2; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0b0e13; color: var(--ink);
+    font: 15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  .card { width: min(520px, 94vw); background: #121824; border: 1px solid #243043; border-radius: 14px; padding: 26px; }
+  h1 { margin: 0 0 16px; font-size: 24px; }
+  label { display: block; color: var(--dim); font-size: 13px; margin: 12px 0 6px; }
+  input, select { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #2c394f; background: #0d1219;
+    color: var(--ink); font-size: 15px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  button { padding: 11px 14px; border: 0; border-radius: 9px; font-weight: 800; cursor: pointer; font-size: 14px; }
+  .start { background: linear-gradient(135deg, #7ee787, #2ea043); color: #06200c; }
+  .reset { background: #2c394f; color: var(--ink); }
+  .login { background: linear-gradient(135deg, #ffb23f, #ff6a3d); color: #1a1208; width: 100%; margin-top: 14px; }
+  .actions { display: flex; gap: 10px; margin-top: 18px; }
+  .status { margin: 18px 0 6px; display: flex; justify-content: space-between; color: var(--dim); font-size: 13px; }
+  .status b { color: var(--ink); }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th { text-align: left; color: var(--dim); font-size: 12px; font-weight: 600; padding: 4px 6px; }
+  td { padding: 5px 6px; border-top: 1px solid #1d2636; }
+  .A { color: var(--a); font-weight: 700; } .B { color: var(--b); font-weight: 700; }
+  .kick { background: none; color: #ff8585; padding: 2px 6px; font-weight: 600; }
+  #msg { min-height: 18px; color: #ff8585; font-size: 13px; margin-top: 8px; }
+  .hide { display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>FPS Clash · Admin</h1>
+  <div id="loginBox">
+    <label for="pw">Admin password (printed in the server terminal)</label>
+    <input id="pw" type="password" autocomplete="current-password">
+    <button class="login" id="loginBtn">LOG IN</button>
+    <div id="msg"></div>
+  </div>
+  <div id="panel" class="hide">
+    <div class="row">
+      <div><label for="map">Map</label><select id="map"></select></div>
+      <div><label for="dur">Match length (seconds)</label><input id="dur" type="number" min="30" max="3600" value="300"></div>
+    </div>
+    <div class="actions">
+      <button class="start" id="start">START GAME</button>
+      <button class="reset" id="reset">RESET TO LOBBY</button>
+    </div>
+    <div class="status">
+      <span>Phase: <b id="phase">–</b></span><span>Map: <b id="curmap">–</b></span><span>Time left: <b id="left">–</b></span>
+      <span><b class="A" id="sA">0</b> : <b class="B" id="sB">0</b></span>
+    </div>
+    <table><thead><tr><th>Player</th><th>Team</th><th>K</th><th>D</th><th></th></tr></thead><tbody id="players"></tbody></table>
+    <div id="msg2" style="color:#ff8585;font-size:13px;min-height:18px;margin-top:8px"></div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const api = async (path, body) => {
+  const r = await fetch(path, { method: body ? "POST" : "GET", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  return r.json();
+};
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let timer = null;
+
+async function refresh() {
+  try {
+    const s = await api("/admin/api/status");
+    if ($("map").options.length !== s.maps.length) {
+      $("map").innerHTML = s.maps.map((m) => `<option ${m === s.map ? "selected" : ""}>${esc(m)}</option>`).join("");
+    }
+    $("phase").textContent = s.phase; $("curmap").textContent = s.map;
+    $("left").textContent = `${Math.floor(s.left / 60)}:${String(s.left % 60).padStart(2, "0")}`;
+    $("sA").textContent = s.scores.A; $("sB").textContent = s.scores.B;
+    $("players").innerHTML = s.players.map((p) =>
+      `<tr><td>${esc(p.name)}</td><td class="${p.team}">${p.team}</td><td>${p.k}</td><td>${p.d}</td><td><button class="kick" data-id="${p.id}">kick</button></td></tr>`).join("")
+      || `<tr><td colspan="5" style="color:#9aa4b2">No players connected yet</td></tr>`;
+    $("msg2").textContent = "";
+  } catch (e) {
+    if (String(e.message).includes("not logged in")) { clearInterval(timer); $("panel").classList.add("hide"); $("loginBox").classList.remove("hide"); }
+    else $("msg2").textContent = e.message;
+  }
+}
+async function showPanel() {
+  $("loginBox").classList.add("hide"); $("panel").classList.remove("hide");
+  await refresh(); timer = setInterval(refresh, 1000);
+}
+$("loginBtn").onclick = async () => {
+  try { await api("/admin/api/login", { password: $("pw").value }); $("pw").value = ""; showPanel(); }
+  catch (e) { $("msg").textContent = e.message; }
+};
+$("pw").addEventListener("keydown", (e) => { if (e.key === "Enter") $("loginBtn").click(); });
+$("start").onclick = async () => {
+  try { await api("/admin/api/start", { map: $("map").value, duration: Number($("dur").value) }); refresh(); }
+  catch (e) { $("msg2").textContent = e.message; }
+};
+$("reset").onclick = async () => { try { await api("/admin/api/reset", {}); refresh(); } catch (e) { $("msg2").textContent = e.message; } };
+$("players").addEventListener("click", async (e) => {
+  const id = e.target.dataset?.id; if (!id) return;
+  try { await api("/admin/api/kick", { id: Number(id) }); refresh(); } catch (err) { $("msg2").textContent = err.message; }
+});
+// If a session cookie already exists, skip the login form.
+api("/admin/api/status").then(showPanel).catch(() => {});
+</script>
+</body>
+</html>
