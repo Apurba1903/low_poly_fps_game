@@ -1,8 +1,8 @@
 # FPS Clash
 
 **A LAN-party first-person shooter for the browser.** One computer runs the server; everyone on the
-same Wi-Fi / LAN joins from a browser — no installs for players. Two teams, server-authoritative
-hit detection, an admin panel to pick the map and start the match.
+same Wi-Fi / LAN joins from a browser — no installs for players. Team Deathmatch and Free for All,
+server-authoritative hit detection, an admin panel to pick the map, mode, and start the match.
 
 Inspired by [Circle Clash](https://github.com/alfesuny/circle-clash), but in 3D first person.
 
@@ -45,7 +45,7 @@ On startup it prints:
 
 - **Players** open `http://<host-ip>:8000`, enter a name, pick a team (or Auto) and click **JOIN GAME**.
   They can walk around the map while waiting in the lobby.
-- **Admin** (you) opens `/admin`, logs in with the printed password, chooses a map and match length,
+- **Admin** (you) opens `/admin`, logs in with the printed password, chooses a map, game mode, and match length,
   then clicks **START GAME**. You can also reset to the lobby or kick players.
 
 The admin password is random each run unless you set one:
@@ -91,8 +91,9 @@ curl -L -o static/three.module.min.js https://cdnjs.cloudflare.com/ajax/libs/thr
 | Move | W A S D (or arrow keys) |
 | Sprint | Shift |
 | Jump | Space (high enough to get on top of a crate) |
-| Crouch | Hold C (slower, smaller target, can't jump; not Ctrl, because Ctrl+W closes the tab) |
+| Crouch | Hold C or Ctrl (slower, smaller target, can't jump) |
 | Aim | Mouse (click the game once to capture the pointer; Esc releases it) |
+| 2× scope | Hold right mouse button with the rifle equipped |
 | Shoot / slash | Left click (hold for automatic fire) |
 | Weapon | 1 rifle · 2 knife · Q or mouse wheel to swap |
 | Reload | R |
@@ -102,7 +103,9 @@ Keyboard and mouse are required; there are no touch controls.
 
 ## Rules
 
-- 2 teams (A / B), max 7 players each. Team changes are allowed until the match starts.
+- **Team Deathmatch:** 2 teams (A / B), max 7 players each, no friendly fire; most team kills wins.
+- **Free for All:** up to 14 players, everyone can damage everyone, with individual kill standings.
+- Team changes are allowed in the lobby in Team Deathmatch.
 - 100 HP. Rifle does 25 damage (37 on a headshot), fires every 0.15 s, 30-round magazine, 1.8 s reload.
   Headshots are the top 0.35 m of the body, so they sit lower when someone is crouching.
 - Knife: 55 damage (two slashes) from the front, instant kill from behind, 1.6 m reach, one slash per 0.5 s.
@@ -114,6 +117,9 @@ Keyboard and mouse are required; there are no touch controls.
 - Floating red hearts sit at random spots on the map (one per ~60 floor cells, at least 2). Walk into
   one while hurt to go back to full health; it then reappears somewhere else 15 s later.
 - The match runs for the admin-set duration; most kills wins.
+- The minimap labels visible teammates (and visible opponents in Free for All), marks the cardinal
+  directions, and is paired with a heading compass at the top of the screen. Random map-seeded wall
+  graffiti marks callout areas such as MID, NORTH EAST, and SOUTH WEST.
 
 ## Maps
 

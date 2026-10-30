@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from game.state import KNIFE, SPAWN_SAFE_DIST, Game  # noqa: E402
+from game.state import FREE_FOR_ALL, KNIFE, MAX_PLAYERS, SPAWN_SAFE_DIST, Game  # noqa: E402
 from game.world import CRATE_HEIGHT, KEY_CROUCH, KEY_JUMP, KEY_W, World  # noqa: E402
 
 maps = {p.stem: World.load(p) for p in sorted((ROOT / "maps").glob("*.json"))}
@@ -83,5 +83,27 @@ for name, w in maps.items():
         print(f"{name}: camper at ({camp[0]:.0f},{camp[1]:.0f}) -> {at_base}/300 base spawns, rest random safe spots")
         if camp == (w.width / 2, w.depth / 2):
             assert 0 < at_base < 300, "with the base safe, spawns should mix base and random"
+
+# --- free for all: no team cap or friendly fire; individual kills are scored
+ffa = Game(world=maps["arena"], mode=FREE_FOR_ALL)
+players = [ffa.add_player(f"FFA{i}", "A") for i in range(MAX_PLAYERS)]
+assert all(players), "FFA should allow up to 14 players regardless of team assignment"
+assert ffa.add_player("OverLimit", "A") is None
+ffa.start(60, FREE_FOR_ALL)
+a, b = players[:2]
+ox, oz = ffa.world.spawns["A"][0]
+a.x, a.z, a.yaw, a.pitch = ox, oz + 1.2, 0.0, 0.0
+b.x, b.z, b.yaw = ox, oz, math.pi
+for p in players[2:]:
+    p.x, p.z = ffa.world.width - 3, ffa.world.depth - 3
+ffa._update_sight(time.monotonic())
+assert b in ffa.visible_to(a), "FFA opponents in sight should be visible even on the same team"
+ffa.try_fire(a, time.monotonic())
+assert b.hp == 63, "FFA must allow attacks against players assigned the same team"
+b.hp = 25
+a.next_fire = 0
+ffa.try_fire(a, time.monotonic())
+assert not b.alive and a.kills == 1 and ffa.scores == {"A": 0, "B": 0}, (b.alive, a.kills, ffa.scores)
+print("free for all: 14-player cap, same-team combat, visibility, individual scoring ok")
 
 print("\nALL GAME TESTS PASSED")

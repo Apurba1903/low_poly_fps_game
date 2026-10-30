@@ -12,11 +12,12 @@
   hitscan firing, respawns, snapshots.
 - **Client** (`static/game.js`, Three.js r160 via import map): pointer-lock FPS camera, fixed 60 Hz
   input steps with client-side prediction + reconciliation (server acks last seq), 110 ms interpolation
-  for other players, tracers/hit markers/damage arrows/kill feed/scoreboard HUD.
+  for other players, tracers/hit markers/damage arrows/kill feed/scoreboard HUD, a named minimap,
+  directional compasses, a 2× rifle scope, and map-seeded callout graffiti.
 
 ## Protocol (JSON)
 - C→S `join{name,team}`, `in{s,k,y,p,dt,w,f?,r?}` (`k` bits: W1 S2 A4 D8 sprint16 jump32 crouch64; `w`: 0 rifle, 1 knife), `team{team}`
-- S→C `welcome{id,map,phase}`, `map{map}`, `state{phase,left,scores,roster[],players[],evts[],me{...}}`, `error{msg}`
+- S→C `welcome{id,map,phase,mode}`, `map{map}`, `state{phase,mode,left,scores,roster[],players[],evts[],me{...}}`, `error{msg}`
 - `roster` row (everyone, no positions): `[id,name,team,kills,deaths]`
 - `players` row (only self, teammates and enemies in line of sight): `[id,name,team,x,z,yaw,pitch,hp,alive,kills,deaths,y,crouch,weapon]`
 - `me` includes `y`/`vy` (feet height, vertical speed) for prediction of jumps.
@@ -30,10 +31,14 @@ full HP; checked after every movement step so input bursts can't skip it. A take
 random cell and reappears after 15 s. Re-scattered on match start, reset and map change.
 
 ## Rules
-Two teams ×7, 100 HP, 25 dmg (×1.5 head), 0.15 s fire interval, 30-round mag, 1.8 s reload,
-3 s respawn, no friendly fire, timer-based match, most kills wins.
-Jump (7.5 m/s, gravity 20: ~1.4 m, lands on crates) and crouch (1.2 m hitbox, 1.0 m eye, 2.5 m/s).
+Team Deathmatch has two teams ×7 and no friendly fire. Free for All supports up to 14 players, with
+friendly fire enabled and individual kills determining the winner. Both modes use 100 HP, 25 dmg
+(×1.5 head), 0.15 s fire interval, 30-round mag, 1.8 s reload, 3 s respawn, and a timer-based match.
+Jump (7.5 m/s, gravity 20: ~1.4 m, lands on crates) and hold crouch (1.2 m hitbox, 1.0 m eye, 2.5 m/s).
 Knife: 55 front / 100 backstab (attacker behind the victim's facing), 1.6 m reach, 0.5 s.
+The rifle supports a held 2× scope. Minimap labels teammates (visible opponents in Free for All),
+shows cardinal directions and player names; the HUD compass reports the facing direction. Seeded wall
+graffiti marks geographic callouts such as MID and NORTH EAST.
 
 ## Spawns (anti spawn-camp)
 Maps place A bases on one side and B bases on the other, walled so no A spawn sees a B spawn (server

@@ -18,9 +18,10 @@ const MINIMAP_SIZE = 200;       // px, longest side
 const $ = (id) => document.getElementById(id);
 const ui = {
   join: $("join"), name: $("name"), go: $("go"), err: $("err"), hud: $("hud"), cross: $("cross"),
-  sA: $("sA"), sB: $("sB"), timer: $("timer"), feed: $("feed"), banner: $("banner"),
+  sA: $("sA"), sB: $("sB"), modeLabel: $("modeLabel"), compass: $("compass"), scope: $("scope"),
+  timer: $("timer"), feed: $("feed"), banner: $("banner"),
   hptext: $("hptext"), hpfill: $("hpfill"), ammo: $("ammo"), score: $("score"),
-  scoreBody: $("score").querySelector("tbody"), lobbybar: $("lobbybar"), vignette: $("vignette"),
+  scoreBody: $("score").querySelector("tbody"), scoreHead: $("scoreHead"), lobbybar: $("lobbybar"), vignette: $("vignette"),
   dmgdir: $("dmgdir"), clickhint: $("clickhint"), minimap: $("minimap"), board: $("board"), healfx: $("healfx"),
 };
 let chosenTeam = "auto";
@@ -43,6 +44,17 @@ ui.lobbybar.querySelectorAll("button").forEach((b) => {
 });
 const startBtn = $("startbtn");
 if (startBtn) startBtn.addEventListener("click", () => fetch("/api/start", { method: "POST" }));
+const teamPicker = document.querySelector(".teams");
+const teamLabel = teamPicker.previousElementSibling;
+function updateModeControls() {
+  const teamsEnabled = mode !== "free_for_all";
+  teamPicker.style.display = teamsEnabled ? "" : "none";
+  teamLabel.style.display = teamsEnabled ? "" : "none";
+  ui.lobbybar.querySelector("span").style.display = teamsEnabled ? "" : "none";
+  ui.lobbybar.querySelectorAll("button[data-team]").forEach((button) => {
+    button.style.display = teamsEnabled ? "" : "none";
+  });
+}
 
 // ----------------------------------------------------------------- three setup
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -74,7 +86,13 @@ const gun = new THREE.Group();
   grip.position.set(0, -0.12, 0.05); grip.rotation.x = 0.3;
   const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.09, 0.25), new THREE.MeshStandardMaterial({ color: 0x5a3b22 }));
   stock.position.set(0, -0.02, 0.27);
-  gun.add(body, barrel, grip, stock);
+  const scope = new THREE.Group();
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.16, 12), dark);
+  tube.rotation.x = Math.PI / 2; tube.position.set(0, 0.075, -0.12);
+  const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.018, 12), new THREE.MeshStandardMaterial({ color: 0x405765, metalness: 0.6, roughness: 0.2 }));
+  lens.rotation.x = Math.PI / 2; lens.position.set(0, 0.075, -0.21);
+  scope.add(tube, lens);
+  gun.add(body, barrel, grip, stock, scope);
   gun.position.set(0.22, -0.2, -0.35);
   camera.add(gun);
 }
@@ -126,8 +144,51 @@ function buildMap(m) {
   };
   mapGroup.add(mk(walls, new THREE.MeshStandardMaterial({ color: 0xb9b2a5, roughness: 0.9 })));
   mapGroup.add(mk(crates, new THREE.MeshStandardMaterial({ color: 0x9a6b3a, roughness: 0.8 })));
+  addGraffiti(walls, m);
   scene.add(mapGroup);
   buildMinimap(m);
+}
+
+function addGraffiti(walls, m) {
+  let seed = 0;
+  for (const ch of m.name) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 0x100000000;
+  };
+  const innerWalls = walls.filter((b) => b[0] > 0 && b[1] > 0 && b[2] < m.width && b[3] < m.depth);
+  const count = Math.min(16, Math.max(6, Math.floor(innerWalls.length / 16)));
+  const chosen = new Set();
+  while (chosen.size < Math.min(count, innerWalls.length)) chosen.add(Math.floor(random() * innerWalls.length));
+  const colors = ["#ff5555", "#ffcb55", "#55d9ff", "#b783ff", "#7cff85"];
+  for (const index of chosen) {
+    const b = innerWalls[index], face = Math.floor(random() * 4);
+    const x = (b[0] + b[2]) / 2, z = (b[1] + b[3]) / 2;
+    let position, rotation;
+    if (face === 0) { position = [x, 1.45 + random() * 1.1, b[1] - 0.008]; rotation = Math.PI; }
+    else if (face === 1) { position = [x, 1.45 + random() * 1.1, b[3] + 0.008]; rotation = 0; }
+    else if (face === 2) { position = [b[0] - 0.008, 1.45 + random() * 1.1, z]; rotation = -Math.PI / 2; }
+    else { position = [b[2] + 0.008, 1.45 + random() * 1.1, z]; rotation = Math.PI / 2; }
+    const east = x > m.width * 0.62, west = x < m.width * 0.38;
+    const north = z < m.depth * 0.38, south = z > m.depth * 0.62;
+    const label = north ? (east ? "NORTH EAST" : west ? "NORTH WEST" : "NORTH")
+      : south ? (east ? "SOUTH EAST" : west ? "SOUTH WEST" : "SOUTH")
+        : east ? "EAST" : west ? "WEST" : "MID";
+    const canvas = document.createElement("canvas"); canvas.width = 256; canvas.height = 96;
+    const g = canvas.getContext("2d"), color = colors[Math.floor(random() * colors.length)];
+    g.save(); g.translate(128, 48); g.rotate((random() - 0.5) * 0.12);
+    g.strokeStyle = color; g.lineWidth = 5; g.lineJoin = "round";
+    g.strokeRect(-116, -34, 232, 68);
+    g.font = "900 29px system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    g.shadowColor = color; g.shadowBlur = 8; g.fillStyle = color; g.fillText(label, 0, 0, 220);
+    g.restore();
+    const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
+    const decal = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.92, 0.42),
+      new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    decal.position.set(...position); decal.rotation.y = rotation; mapGroup.add(decal);
+  }
 }
 
 // ----------------------------------------------------------------- health drops (hearts)
@@ -173,15 +234,25 @@ function buildMinimap(m) {
     g.fillStyle = b[5] === "wall" ? "#b9b2a5" : "#9a6b3a";
     g.fillRect(b[0] * mmScale, b[1] * mmScale, (b[2] - b[0]) * mmScale, (b[3] - b[1]) * mmScale);
   }
+  g.font = "bold 10px system-ui"; g.textAlign = "center"; g.textBaseline = "middle";
+  for (const [label, x, y] of [["N", c.width / 2, 8], ["S", c.width / 2, c.height - 8], ["W", 8, c.height / 2], ["E", c.width - 8, c.height / 2]]) {
+    g.fillStyle = "#000a"; g.fillRect(x - 7, y - 6, 14, 12);
+    g.fillStyle = "#fff"; g.fillText(label, x, y);
+  }
 }
 function drawMinimap() {
   if (!mmBase) return;
   const g = ui.minimap.getContext("2d"), s = mmScale;
   g.drawImage(mmBase, 0, 0);
-  g.fillStyle = TEAM_CSS[myTeam] || "#fff";
   for (const r of remotes.values()) {
-    if (r.team !== myTeam || !r.group.visible) continue;
-    g.beginPath(); g.arc(r.group.position.x * s, r.group.position.z * s, 3.5, 0, Math.PI * 2); g.fill();
+    if ((mode !== "free_for_all" && r.team !== myTeam) || !r.group.visible) continue;
+    const x = r.group.position.x * s, y = r.group.position.z * s;
+    g.fillStyle = TEAM_CSS[r.team] || "#fff";
+    g.beginPath(); g.arc(x, y, 3.5, 0, Math.PI * 2); g.fill();
+    g.font = "10px system-ui"; g.textAlign = "left"; g.textBaseline = "middle";
+    const labelX = Math.min(x + 5, ui.minimap.width - g.measureText(r.name).width - 3);
+    g.fillStyle = "#000c"; g.fillRect(labelX - 2, y - 6, g.measureText(r.name).width + 4, 12);
+    g.fillStyle = "#fff"; g.fillText(r.name, labelX, y);
   }
   // You: white arrow pointing where the camera faces.
   const x = me.x * s, y = me.z * s, fx = -Math.sin(me.yaw), fy = -Math.cos(me.yaw), px = -fy, py = fx;
@@ -190,6 +261,31 @@ function drawMinimap() {
   g.lineTo(x - fx * 4 + px * 4, y - fy * 4 + py * 4);
   g.lineTo(x - fx * 4 - px * 4, y - fy * 4 - py * 4);
   g.closePath(); g.fill();
+}
+
+function drawCompass() {
+  const canvas = ui.compass, g = canvas.getContext("2d");
+  g.clearRect(0, 0, canvas.width, canvas.height);
+  const center = canvas.width / 2, heading = ((-me.yaw * 180 / Math.PI) % 360 + 360) % 360;
+  g.save(); g.translate(center, 0);
+  g.font = "bold 20px system-ui"; g.textAlign = "center"; g.textBaseline = "middle";
+  for (let bearing = 0; bearing < 360; bearing += 15) {
+    let delta = ((bearing - heading + 540) % 360) - 180;
+    const x = delta * 3.2;
+    if (Math.abs(x) > center - 18) continue;
+    const cardinal = bearing % 90 === 0;
+    g.strokeStyle = cardinal ? "#fff" : "#ffffff88"; g.lineWidth = cardinal ? 2 : 1;
+    g.beginPath(); g.moveTo(x, 30); g.lineTo(x, cardinal ? 14 : 21); g.stroke();
+    if (cardinal) {
+      g.fillStyle = bearing === 0 ? "#ff7777" : "#fff";
+      g.fillText(["N", "E", "S", "W"][bearing / 90], x, 12);
+    }
+  }
+  g.restore();
+  g.strokeStyle = "#ffb23f"; g.lineWidth = 3;
+  g.beginPath(); g.moveTo(center, 20); g.lineTo(center, 34); g.stroke();
+  g.fillStyle = "#fff"; g.font = "bold 12px system-ui"; g.textAlign = "center";
+  g.fillText(`${Math.round(heading).toString().padStart(3, "0")}°`, center, 66);
 }
 
 // ----------------------------------------------------------------- movement (mirrors World.move in game/world.py)
@@ -243,10 +339,10 @@ function moveLocal(s, yaw, keys, dt) {
 }
 
 // ----------------------------------------------------------------- state
-let ws = null, myId = 0, myTeam = null, lastRoster = [], me = { x: 0, y: 0, z: 0, vy: 0, yaw: 0, pitch: 0, alive: true, hp: 100, ammo: 30 };
+let ws = null, myId = 0, myTeam = null, mode = "team_deathmatch", lastRoster = [], me = { x: 0, y: 0, z: 0, vy: 0, yaw: 0, pitch: 0, alive: true, hp: 100, ammo: 30 };
 let phase = "lobby", seq = 0, pending = [], keys = 0, mouseDown = false, reloadQueued = false, acc = 0, lastT = 0;
 let weapon = RIFLE, eye = EYE_HEIGHT, swing = 0, reloading = false;
-let crouchToggle = false, ctrlHeld = false, lastKnifeSwing = 0;
+let aiming = false, lastKnifeSwing = 0;
 const remotes = new Map();       // pid -> {group, name, team, mat, label}
 let snaps = [];                  // [{t, players: Map}]
 let hitMarkUntil = 0, flashUntil = 0, recoil = 0, feedTimer = [];
@@ -270,7 +366,8 @@ function connect(name, team) {
 function onMessage(m) {
   if (m.t === "error") { ui.err.textContent = m.msg; ui.go.disabled = false; return; }
   if (m.t === "welcome") {
-    myId = m.id; buildMap(m.map); phase = m.phase;
+    myId = m.id; buildMap(m.map); phase = m.phase; mode = m.mode || mode;
+    updateModeControls();
     ui.join.style.display = "none"; ui.hud.classList.add("on"); ui.clickhint.classList.remove("hidden");
     renderer.domElement.focus();
     lastT = performance.now(); requestAnimationFrame(frame);
@@ -281,7 +378,8 @@ function onMessage(m) {
 }
 
 function onState(s) {
-  const prevPhase = phase; phase = s.phase;
+  const prevPhase = phase, prevMode = mode; phase = s.phase; mode = s.mode || mode;
+  updateModeControls();
   const mine = s.me;
   // --- reconcile own position
   const srv = s.players.find((p) => p[0] === myId);
@@ -310,7 +408,7 @@ function onState(s) {
     const p = map.get(pid);
     if (p && p[2] !== r.team) { r.team = p[2]; r.mat.color.setHex(TEAM_COLOR[p[2]]); r.setLabel(p[1], p[2]); }
     // Teammate tags show through walls; enemy tags are hidden by walls like the enemy.
-    r.label.material.depthTest = r.team !== myTeam;
+    r.label.material.depthTest = mode === "free_for_all" || r.team !== myTeam;
   }
   // --- events
   for (const e of s.evts) {
@@ -321,6 +419,8 @@ function onState(s) {
     else if (e.e === "end") { /* banner handled by phase */ }
   }
   // --- HUD
+  ui.modeLabel.textContent = mode === "free_for_all" ? "FFA" : "TDM";
+  ui.sA.style.display = ui.sB.style.display = mode === "free_for_all" ? "none" : "";
   ui.sA.textContent = s.scores.A; ui.sB.textContent = s.scores.B;
   ui.timer.textContent = fmt(s.left);
   ui.hptext.textContent = me.hp; ui.hpfill.style.width = me.hp + "%";
@@ -330,17 +430,31 @@ function onState(s) {
   if (!me.alive) showBanner("YOU DIED", `Respawning in ${Math.ceil(mine.resp)}…`);
   else if (phase === "lobby") showBanner("LOBBY", "Walk around · the admin will start the match");
   else if (phase === "ended") {
-    const w = s.scores.A === s.scores.B ? "DRAW" : s.scores.A > s.scores.B ? "TEAM A WINS" : "TEAM B WINS";
-    showBanner(w, `${s.scores.A} – ${s.scores.B}`);
+    if (mode === "free_for_all") {
+      const leader = [...s.roster].sort((a, b) => b[3] - a[3])[0];
+      const tied = leader && s.roster.filter((p) => p[3] === leader[3]).length > 1;
+      showBanner(!leader ? "MATCH OVER" : tied ? "DRAW" : `${esc(leader[1])} WINS`,
+        leader ? `${leader[3]} kills${tied ? " each" : ""}` : "No players");
+    } else {
+      const w = s.scores.A === s.scores.B ? "DRAW" : s.scores.A > s.scores.B ? "TEAM A WINS" : "TEAM B WINS";
+      showBanner(w, `${s.scores.A} – ${s.scores.B}`);
+    }
   } else showBanner("", "");
   lastRoster = s.roster;
-  if (ui.score.classList.contains("on") || prevPhase !== phase) renderScore(lastRoster);
-  renderBoard(s.roster, s.scores);
+  if (ui.score.classList.contains("on") || prevPhase !== phase || prevMode !== mode) renderScore(lastRoster);
+  renderBoard(s.roster, s.scores, mode);
 }
 
 // Top-right team leaderboard: leading team first, players by kills.
 let lastBoard = "";
-function renderBoard(roster, scores) {
+function renderBoard(roster, scores, gameMode) {
+  if (gameMode === "free_for_all") {
+    const rows = [...roster].sort((a, b) => b[3] - a[3] || a[4] - b[4]);
+    const html = `<div class="team">FREE FOR ALL</div>${rows.map((p, i) =>
+      `<div class="pl${p[0] === myId ? " me" : ""}"><span>${i + 1}. ${esc(p[1])}${p[0] === myId ? " (you)" : ""}</span><span>${p[3]} / ${p[4]}</span></div>`).join("")}`;
+    if (html !== lastBoard) { ui.board.innerHTML = html; lastBoard = html; }
+    return;
+  }
   const teams = scores.B > scores.A ? ["B", "A"] : ["A", "B"];
   const html = teams.map((t) => {
     const rows = roster.filter((p) => p[2] === t).sort((a, b) => b[3] - a[3] || a[4] - b[4]);
@@ -488,6 +602,7 @@ function renderAmmo() {
 function setWeapon(w) {
   if (w !== weapon) {
     weapon = w;
+    if (weapon !== RIFLE) aiming = false;
     swing = 0;
     renderAmmo();
     const s1 = $("slot-rifle"), s2 = $("slot-knife");
@@ -530,19 +645,15 @@ addEventListener("keydown", (e) => {
   if (e.code === "ShiftLeft" || e.code === "ShiftRight") keys |= KEY.SPRINT;
   if (e.code === "Space") {
     e.preventDefault();
-    crouchToggle = false;
-    ctrlHeld = false;
-    keys &= ~KEY.CROUCH;
     keys |= KEY.JUMP;
   }
   if (e.code === "ControlLeft" || e.code === "ControlRight" || e.key === "Control") {
     ctrlHeld = true;
-    keys |= KEY.CROUCH;
+    syncCrouch();
   }
-  if (e.code === "KeyC" || e.key === "c" || e.key === "C") {
-    crouchToggle = !crouchToggle;
-    if (crouchToggle) keys |= KEY.CROUCH;
-    else if (!ctrlHeld) keys &= ~KEY.CROUCH;
+  if (e.code === "KeyC") {
+    cHeld = true;
+    syncCrouch();
   }
   if (e.code === "KeyR" || e.key === "r" || e.key === "R") reloadQueued = true;
   if (e.code === "Digit1" || e.code === "Numpad1" || e.key === "1") setWeapon(RIFLE);
@@ -560,10 +671,13 @@ addEventListener("keyup", (e) => {
   if (e.code === "Space") keys &= ~KEY.JUMP;
   if (e.code === "ControlLeft" || e.code === "ControlRight" || e.key === "Control") {
     ctrlHeld = false;
-    if (!crouchToggle) keys &= ~KEY.CROUCH;
+    syncCrouch();
   }
+  if (e.code === "KeyC") { cHeld = false; syncCrouch(); }
 });
-addEventListener("blur", () => { keys = 0; crouchToggle = false; ctrlHeld = false; mouseDown = false; });
+let cHeld = false, ctrlHeld = false;
+function syncCrouch() { if (cHeld || ctrlHeld) keys |= KEY.CROUCH; else keys &= ~KEY.CROUCH; }
+addEventListener("blur", () => { keys = 0; cHeld = false; ctrlHeld = false; mouseDown = false; aiming = false; });
 const lock = () => {
   ensureAudio();
   renderer.domElement.focus();
@@ -574,13 +688,17 @@ renderer.domElement.addEventListener("mousedown", (e) => {
   ensureAudio();
   if (document.pointerLockElement !== renderer.domElement) { lock(); return; }
   if (e.button === 0) mouseDown = true;
+  if (e.button === 2 && weapon === RIFLE) aiming = true;
 });
-addEventListener("mouseup", (e) => { if (e.button === 0) mouseDown = false; });
+addEventListener("mouseup", (e) => {
+  if (e.button === 0) mouseDown = false;
+  if (e.button === 2) aiming = false;
+});
 addEventListener("contextmenu", (e) => e.preventDefault());
 document.addEventListener("pointerlockchange", () => {
   const locked = document.pointerLockElement === renderer.domElement;
   ui.clickhint.classList.toggle("hidden", locked || ui.join.style.display !== "none");
-  if (!locked) { keys = 0; crouchToggle = false; ctrlHeld = false; mouseDown = false; }
+  if (!locked) { keys = 0; cHeld = false; ctrlHeld = false; mouseDown = false; aiming = false; }
 });
 addEventListener("mousemove", (e) => {
   if (document.pointerLockElement !== renderer.domElement) return;
@@ -610,12 +728,17 @@ function frame(now) {
   eye += (eyeTarget - eye) * Math.min(1, dt * 14);
   camera.position.set(me.x, me.y + eye, me.z);
   camera.rotation.y = me.yaw; camera.rotation.x = me.pitch;
+  const scoped = aiming && weapon === RIFLE;
+  const fov = scoped ? 37.5 : 75;
+  if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  ui.scope.classList.toggle("on", scoped);
+  ui.cross.style.display = scoped ? "none" : "";
   // weapon bob + recoil / knife swing
   const moving = keys & (KEY.W | KEY.S | KEY.A | KEY.D);
   const bob = moving ? Math.sin(now / 90) * 0.012 : Math.sin(now / 600) * 0.004;
   recoil = Math.max(0, recoil - dt * 10);
   swing = Math.max(0, swing - dt * 4);
-  gun.visible = weapon === RIFLE; knife.visible = weapon === KNIFE;
+  gun.visible = weapon === RIFLE && !scoped; knife.visible = weapon === KNIFE;
   gun.position.set(0.22, -0.2 + bob, -0.35 + recoil * 0.08);
   gun.rotation.x = recoil * 0.12;
   const s = Math.sin(swing * Math.PI);           // 0 -> 1 -> 0 over one slash
@@ -627,11 +750,19 @@ function frame(now) {
   updateRemotes(now, dt);
   animateHearts(now);
   drawMinimap();
+  drawCompass();
   renderer.render(scene, camera);
 }
 
 // ----------------------------------------------------------------- helpers
-function renderScore(roster) {   // roster rows: [id, name, team, kills, deaths]
+function renderScore(roster) {
+  if (mode === "free_for_all") {
+    ui.scoreHead.innerHTML = "<th>#</th><th>Player</th><th>K</th><th>D</th>";
+    const rows = [...roster].sort((a, b) => b[3] - a[3] || a[4] - b[4]);
+    ui.scoreBody.innerHTML = rows.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p[1])}${p[0] === myId ? " (you)" : ""}</td><td>${p[3]}</td><td>${p[4]}</td></tr>`).join("");
+    return;
+  }
+  ui.scoreHead.innerHTML = "<th>Player</th><th>Team</th><th>K</th><th>D</th>";
   const rows = [...roster].sort((a, b) => a[2].localeCompare(b[2]) || b[3] - a[3]);
   ui.scoreBody.innerHTML = rows.map((p) => `<tr class="${p[2]}"><td>${esc(p[1])}${p[0] === myId ? " (you)" : ""}</td><td>${p[2]}</td><td>${p[3]}</td><td>${p[4]}</td></tr>`).join("");
 }

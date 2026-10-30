@@ -21,7 +21,7 @@ from fastapi import Cookie, FastAPI, HTTPException, Request, WebSocket, WebSocke
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from game.state import TICK_RATE, Game, Player, admin_status
+from game.state import GAME_MODES, TICK_RATE, Game, Player, admin_status
 from game.world import World
 
 ROOT = Path(__file__).resolve().parent
@@ -110,7 +110,12 @@ async def admin_page() -> FileResponse:
 
 @app.get("/api/info")
 async def info() -> dict[str, Any]:
-    return {"phase": game.phase, "map": game.world.name, "teams": {t: game.team_count(t) for t in ("A", "B")}}
+    return {
+        "phase": game.phase,
+        "mode": game.mode,
+        "map": game.world.name,
+        "teams": {t: game.team_count(t) for t in ("A", "B")},
+    }
 
 
 @app.post("/api/start")
@@ -141,7 +146,9 @@ async def player_ws(ws: WebSocket) -> None:
         sockets[player.pid] = ws
         log.info("+ %s joined (team %s)", player.name, player.team)
         await ws.send_text(
-            json.dumps({"t": "welcome", "id": player.pid, "map": game.world.to_client(), "phase": game.phase})
+            json.dumps(
+                {"t": "welcome", "id": player.pid, "map": game.world.to_client(), "phase": game.phase, "mode": game.mode}
+            )
         )
         while True:
             msg = json.loads(await ws.receive_text())
@@ -188,12 +195,15 @@ async def admin_start(req: Request, fps_admin: str | None = Cookie(default=None)
     require_admin(fps_admin)
     body = await req.json()
     map_name = str(body.get("map", game.world.name))
+    mode = str(body.get("mode", game.mode))
+    if mode not in GAME_MODES:
+        raise HTTPException(400, "unknown game mode")
     duration = max(30, min(3600, int(body.get("duration", 300))))
     if map_name != game.world.name:
         game.set_world(load_map(map_name))
         await broadcast({"t": "map", "map": game.world.to_client()})
-    game.start(duration)
-    log.info("Match started on %s for %ss", map_name, duration)
+    game.start(duration, mode)
+    log.info("Match started on %s in %s for %ss", map_name, mode, duration)
     return {"ok": True}
 
 
