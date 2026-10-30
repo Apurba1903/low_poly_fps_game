@@ -113,6 +113,14 @@ async def info() -> dict[str, Any]:
     return {"phase": game.phase, "map": game.world.name, "teams": {t: game.team_count(t) for t in ("A", "B")}}
 
 
+@app.post("/api/start")
+async def start_game() -> dict[str, Any]:
+    if game.phase != "playing":
+        game.start(300)
+        log.info("Match started from lobby")
+    return {"ok": True}
+
+
 # -------------------------------------------------------------- player ws
 @app.websocket("/ws")
 async def player_ws(ws: WebSocket) -> None:

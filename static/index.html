@@ -51,6 +51,10 @@
   #ammo { position: absolute; right: 24px; bottom: 20px; font-weight: 800; font-size: 34px; text-shadow: 0 1px 3px #000;
     font-variant-numeric: tabular-nums; }
   #ammo small { font-size: 16px; color: var(--dim); }
+  #weapons { position: absolute; right: 24px; bottom: 68px; display: flex; gap: 8px; }
+  .wslot { background: #0007; border: 1px solid #2c394f; border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 700; color: var(--dim); }
+  .wslot.active { border-color: #ffb23f; color: #ffb23f; background: #000a; }
+  .wkey { display: inline-block; background: #2c394f; color: #fff; border-radius: 3px; padding: 0 4px; margin-right: 4px; font-size: 10px; }
   #topright { position: absolute; right: 20px; top: 20px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
   #board { width: 230px; background: #0009; border-radius: 10px; padding: 8px 10px; font-size: 13px; }
   #board .team { display: flex; justify-content: space-between; font-weight: 800; font-size: 15px; margin-top: 6px; padding: 2px 0; border-bottom: 1px solid #fff2; }
@@ -105,7 +109,7 @@
     </div>
     <button id="go">JOIN GAME</button>
     <div id="err"></div>
-    <div class="hint">WASD move · Mouse aim · Click shoot · R reload · Shift sprint · Space jump · C crouch · 1/2/Q/wheel rifle↔knife · Tab scoreboard</div>
+    <div class="hint">WASD move · Mouse aim · Left Click attack · R reload · Shift sprint · Space jump · C (toggle) / Ctrl (hold) crouch · 1 / 2 / Q / Wheel weapon · Tab scoreboard</div>
   </div>
 </div>
 
@@ -119,9 +123,13 @@
   <div id="topright"><div id="board"></div><div id="feed"></div></div>
   <div id="banner"></div>
   <div id="bottom-left"><div id="hptext">100</div><div id="hpbar"><div id="hpfill"></div></div></div>
+  <div id="weapons">
+    <div class="wslot active" id="slot-rifle"><span class="wkey">1</span> RIFLE</div>
+    <div class="wslot" id="slot-knife"><span class="wkey">2</span> KNIFE</div>
+  </div>
   <div id="ammo">30 <small>/ 30</small></div>
   <div id="score"><table><thead><tr><th>Player</th><th>Team</th><th>K</th><th>D</th></tr></thead><tbody></tbody></table></div>
-  <div id="lobbybar"><span>Waiting for the admin to start · switch team:</span><button data-team="A">A</button><button data-team="B">B</button></div>
+  <div id="lobbybar"><span>Switch team:</span><button data-team="A">A</button><button data-team="B">B</button><button id="startbtn" style="background: linear-gradient(135deg, #ffb23f, #ff6a3d); color: #1a1208; font-weight: bold; margin-left: 8px;">START MATCH</button></div>
   <div id="clickhint" class="hidden">Click to capture the mouse</div>
 </div>
 
