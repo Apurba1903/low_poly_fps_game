@@ -43,6 +43,8 @@ ui.lobbybar.querySelectorAll("button").forEach((b) => b.addEventListener("click"
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
+renderer.domElement.tabIndex = 0;
+renderer.domElement.setAttribute("aria-label", "FPS Clash game view");
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
@@ -261,6 +263,7 @@ function onMessage(m) {
   if (m.t === "welcome") {
     myId = m.id; buildMap(m.map); phase = m.phase;
     ui.join.style.display = "none"; ui.hud.classList.add("on"); ui.clickhint.classList.remove("hidden");
+    renderer.domElement.focus();
     lastT = performance.now(); requestAnimationFrame(frame);
     return;
   }
@@ -454,6 +457,7 @@ function playShot(vol) {
 // ----------------------------------------------------------------- input
 addEventListener("keydown", (e) => {
   if (ui.join.style.display !== "none") return;
+  if (["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
   if (e.code === "Tab") { e.preventDefault(); ui.score.classList.add("on"); renderScore(lastRoster); }
   if (e.code === "KeyW" || e.code === "ArrowUp") keys |= KEY.W;
   if (e.code === "KeyS" || e.code === "ArrowDown") keys |= KEY.S;
@@ -479,7 +483,10 @@ addEventListener("keyup", (e) => {
   if (e.code === "KeyC") keys &= ~KEY.CROUCH;
 });
 addEventListener("blur", () => { keys = 0; mouseDown = false; });
-const lock = () => renderer.domElement.requestPointerLock();
+const lock = () => {
+  renderer.domElement.focus();
+  renderer.domElement.requestPointerLock();
+};
 ui.clickhint.addEventListener("click", lock);
 renderer.domElement.addEventListener("mousedown", (e) => {
   if (document.pointerLockElement !== renderer.domElement) { lock(); return; }
