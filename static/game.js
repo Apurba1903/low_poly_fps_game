@@ -13,6 +13,7 @@ const SENS = 0.0022;
 const TEAM_COLOR = { A: 0xff5c5c, B: 0x4da3ff };
 const TEAM_CSS = { A: "#ff5c5c", B: "#4da3ff" };
 const MINIMAP_SIZE = 200;       // px, longest side
+const SCOPE_FOV = 37.5;
 
 // ----------------------------------------------------------------- DOM
 const $ = (id) => document.getElementById(id);
@@ -64,6 +65,39 @@ renderer.domElement.tabIndex = 0;
 renderer.domElement.setAttribute("aria-label", "FPS Clash game view");
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
+const scopeTarget = new THREE.WebGLRenderTarget(1, 1, {
+  minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat,
+});
+const lensMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    uTexture: { value: scopeTarget.texture }, uAspect: { value: innerWidth / innerHeight },
+    uRadius: { value: 0.275 }, uBlend: { value: 0 },
+  },
+  vertexShader: `varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: `uniform sampler2D uTexture;
+    uniform float uAspect;
+    uniform float uRadius;
+    uniform float uBlend;
+    varying vec2 vUv;
+    void main() {
+      float d = length(vec2((vUv.x - 0.5) * uAspect, vUv.y - 0.5));
+      float edge = 1.0 - smoothstep(uRadius - 0.0015, uRadius + 0.0015, d);
+      vec3 color = texture2D(uTexture, vUv).rgb;
+      gl_FragColor = vec4(color, edge * uBlend);
+      #include <colorspace_fragment>
+    }`,
+  transparent: true, depthTest: false, depthWrite: false, toneMapped: false,
+});
+const lensScene = new THREE.Scene();
+lensScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), lensMaterial));
+const lensCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+function resizeScopeTarget() {
+  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  scopeTarget.setSize(size.x, size.y);
+  lensMaterial.uniforms.uAspect.value = size.x / size.y;
+  lensMaterial.uniforms.uRadius.value = 0.275 * Math.min(size.x, size.y) / size.y;
+}
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x9fc3e6);
 scene.fog = new THREE.Fog(0x9fc3e6, 40, 110);
@@ -73,31 +107,51 @@ scene.add(new THREE.HemisphereLight(0xdfe9f5, 0x55503f, 1.1));
 const sun = new THREE.DirectionalLight(0xfff2d8, 1.3); sun.position.set(30, 60, 20); scene.add(sun);
 addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
+  resizeScopeTarget();
 });
+resizeScopeTarget();
 
 // Own weapon, attached to camera.
 const gun = new THREE.Group();
 {
-  const dark = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.6, metalness: 0.4 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.5), dark); body.position.set(0, 0, -0.1);
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.35, 10), dark);
-  barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.035, -0.5);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.08), new THREE.MeshStandardMaterial({ color: 0x5a3b22 }));
-  grip.position.set(0, -0.12, 0.05); grip.rotation.x = 0.3;
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.09, 0.25), new THREE.MeshStandardMaterial({ color: 0x5a3b22 }));
-  stock.position.set(0, -0.02, 0.27);
-  const scope = new THREE.Group();
-  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.16, 12), dark);
-  tube.rotation.x = Math.PI / 2; tube.position.set(0, 0.075, -0.12);
-  const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.018, 12), new THREE.MeshStandardMaterial({ color: 0x405765, metalness: 0.6, roughness: 0.2 }));
-  lens.rotation.x = Math.PI / 2; lens.position.set(0, 0.075, -0.21);
-  scope.add(tube, lens);
-  gun.add(body, barrel, grip, stock, scope);
+  const steel = new THREE.MeshStandardMaterial({ color: 0x34383b, roughness: 0.48, metalness: 0.68 });
+  const darkSteel = new THREE.MeshStandardMaterial({ color: 0x171a1c, roughness: 0.58, metalness: 0.55 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x79451f, roughness: 0.78 });
+  const addBox = (size, material, position, rotation = 0) => {
+    const part = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+    part.position.set(...position); part.rotation.x = rotation; gun.add(part); return part;
+  };
+  addBox([0.09, 0.075, 0.29], steel, [0, 0, -0.18]);
+  addBox([0.075, 0.025, 0.3], darkSteel, [0, 0.05, -0.17]);
+  addBox([0.085, 0.065, 0.28], wood, [0, -0.025, -0.48]);
+  addBox([0.095, 0.035, 0.36], wood, [0, 0, 0.3], -0.04);
+  addBox([0.095, 0.04, 0.075], wood, [0, -0.035, 0.46], -0.12);
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.021, 0.66, 12), steel);
+  barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.027, -0.79); gun.add(barrel);
+  const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.023, 0.023, 0.055, 12), darkSteel);
+  muzzle.rotation.x = Math.PI / 2; muzzle.position.set(0, 0.027, -1.13); gun.add(muzzle);
+  addBox([0.055, 0.07, 0.09], steel, [0, 0.028, -1.0]);
+  const frontSight = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.006, 6, 12), darkSteel);
+  frontSight.position.set(0, 0.075, -1.0); gun.add(frontSight);
+  addBox([0.035, 0.06, 0.045], steel, [0, 0.095, -0.34]);
+  const rearSight = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.014, 0.012), darkSteel);
+  rearSight.position.set(0, 0.13, -0.34); gun.add(rearSight);
+  const grip = addBox([0.065, 0.17, 0.085], wood, [0, -0.125, 0.015], 0.25);
+  grip.rotation.z = -0.12;
+  const magCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, -0.055, -0.12), new THREE.Vector3(0, -0.13, -0.105),
+    new THREE.Vector3(0, -0.21, -0.06), new THREE.Vector3(0, -0.27, 0.015),
+  ]);
+  const magazine = new THREE.Mesh(new THREE.TubeGeometry(magCurve, 20, 0.042, 10, false), darkSteel);
+  gun.add(magazine);
+  addBox([0.06, 0.018, 0.035], steel, [0, -0.07, -0.12]);
+  const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.006, 6, 16, Math.PI), steel);
+  triggerGuard.position.set(0, -0.085, -0.03); triggerGuard.rotation.set(Math.PI / 2, 0, Math.PI); gun.add(triggerGuard);
   gun.position.set(0.22, -0.2, -0.35);
   camera.add(gun);
 }
 const flash = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), new THREE.MeshBasicMaterial({ color: 0xfff0a0 }));
-flash.position.set(0, 0.035, -0.7); flash.visible = false; gun.add(flash);
+flash.position.set(0, 0.027, -1.16); flash.visible = false; gun.add(flash);
 // Knife, also on the camera; only one of gun / knife is visible at a time.
 const knife = new THREE.Group();
 {
@@ -342,7 +396,7 @@ function moveLocal(s, yaw, keys, dt) {
 let ws = null, myId = 0, myTeam = null, mode = "team_deathmatch", lastRoster = [], me = { x: 0, y: 0, z: 0, vy: 0, yaw: 0, pitch: 0, alive: true, hp: 100, ammo: 30 };
 let phase = "lobby", seq = 0, pending = [], keys = 0, mouseDown = false, reloadQueued = false, acc = 0, lastT = 0;
 let weapon = RIFLE, eye = EYE_HEIGHT, swing = 0, reloading = false;
-let aiming = false, lastKnifeSwing = 0;
+let aiming = false, lastKnifeSwing = 0, footstepDistance = 0, scopeBlend = 0;
 const remotes = new Map();       // pid -> {group, name, team, mat, label}
 let snaps = [];                  // [{t, players: Map}]
 let hitMarkUntil = 0, flashUntil = 0, recoil = 0, feedTimer = [];
@@ -551,11 +605,12 @@ function onShot(e, players) {
   let from;
   if (e.id === myId) {
     flashUntil = performance.now() + 40; recoil = 1; playShot(1.0);
-    from = flash.getWorldPosition(new THREE.Vector3());
+    from = e.a ? new THREE.Vector3(...e.from) : flash.getWorldPosition(new THREE.Vector3());
   } else {
     const p = players.get(e.id); if (!p) return;
     const r = remotes.get(e.id);
-    from = r ? r.rifle.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(p[3], p[11] + EYE_HEIGHT, p[4]);
+    from = e.a ? new THREE.Vector3(...e.from) :
+      r ? r.rifle.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(p[3], p[11] + EYE_HEIGHT, p[4]);
     const d = Math.hypot(p[3] - me.x, p[4] - me.z); playShot(Math.max(0.08, 1 - d / 60));
   }
   const geo = new THREE.BufferGeometry().setFromPoints([from, new THREE.Vector3(e.to[0], e.to[1], e.to[2])]);
@@ -628,6 +683,24 @@ function playShot(vol) {
     const g = actx.createGain(); g.gain.value = 0.35 * vol;
     const f = actx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 1800;
     src.connect(f).connect(g).connect(actx.destination); src.start();
+  } catch { /* audio is optional */ }
+}
+function playFootstep(vol) {
+  try {
+    ensureAudio();
+    if (!actx) return;
+    const n = Math.floor(actx.sampleRate * 0.1);
+    const buffer = actx.createBuffer(1, n, actx.sampleRate), samples = buffer.getChannelData(0);
+    for (let i = 0; i < n; i++) samples[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 5);
+    const noise = actx.createBufferSource(); noise.buffer = buffer;
+    const filter = actx.createBiquadFilter(); filter.type = "lowpass"; filter.frequency.value = 650;
+    const noiseGain = actx.createGain(); noiseGain.gain.value = vol * 0.22;
+    noise.connect(filter).connect(noiseGain).connect(actx.destination);
+    noise.start();
+    const thud = actx.createOscillator(); thud.type = "sine"; thud.frequency.value = 92;
+    const thudGain = actx.createGain(); thudGain.gain.setValueAtTime(vol * 0.18, actx.currentTime);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.08);
+    thud.connect(thudGain).connect(actx.destination); thud.start(); thud.stop(actx.currentTime + 0.09);
   } catch { /* audio is optional */ }
 }
 
@@ -717,9 +790,26 @@ function frame(now) {
   }
   while (acc >= STEP) {
     acc -= STEP;
-    const inp = { t: "in", s: ++seq, k: keys, y: round(me.yaw), p: round(me.pitch), dt: STEP, w: weapon, f: mouseDown && me.alive };
+    const inp = { t: "in", s: ++seq, k: keys, y: round(me.yaw), p: round(me.pitch), dt: STEP, w: weapon,
+      a: aiming && weapon === RIFLE, f: mouseDown && me.alive };
     if (reloadQueued) { inp.r = true; reloadQueued = false; }
-    if (me.alive) moveLocal(me, me.yaw, keys, STEP);
+    if (me.alive) {
+      const oldX = me.x, oldZ = me.z;
+      moveLocal(me, me.yaw, keys, STEP);
+      if (keys & KEY.CROUCH) {
+        footstepDistance = 0;
+      } else {
+        footstepDistance += Math.hypot(me.x - oldX, me.z - oldZ);
+        const running = !!(keys & KEY.SPRINT);
+        const stride = running ? 2.2 : 2.5;
+        while (footstepDistance >= stride) {
+          footstepDistance -= stride;
+          playFootstep(running ? 0.7 : 0.32);
+        }
+      }
+    } else {
+      footstepDistance = 0;
+    }
     pending.push(inp); if (pending.length > 240) pending.shift();
     send(inp);
   }
@@ -729,9 +819,10 @@ function frame(now) {
   camera.position.set(me.x, me.y + eye, me.z);
   camera.rotation.y = me.yaw; camera.rotation.x = me.pitch;
   const scoped = aiming && weapon === RIFLE;
-  const fov = scoped ? 37.5 : 75;
-  if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
-  ui.scope.classList.toggle("on", scoped);
+  scopeBlend = THREE.MathUtils.damp(scopeBlend, scoped ? 1 : 0, -Math.log(0.01) / 0.15, dt);
+  if (camera.fov !== 75) { camera.fov = 75; camera.updateProjectionMatrix(); }
+  lensMaterial.uniforms.uBlend.value = scopeBlend;
+  ui.scope.classList.toggle("on", scopeBlend > 0.001);
   ui.cross.style.display = scoped ? "none" : "";
   // weapon bob + recoil / knife swing
   const moving = keys & (KEY.W | KEY.S | KEY.A | KEY.D);
@@ -751,7 +842,18 @@ function frame(now) {
   animateHearts(now);
   drawMinimap();
   drawCompass();
-  renderer.render(scene, camera);
+  if (scopeBlend > 0.001) {
+    camera.fov = SCOPE_FOV; camera.updateProjectionMatrix();
+    renderer.setRenderTarget(scopeTarget); renderer.clear(); renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    camera.fov = 75; camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
+    renderer.autoClear = false;
+    renderer.render(lensScene, lensCamera);
+    renderer.autoClear = true;
+  } else {
+    renderer.render(scene, camera);
+  }
 }
 
 // ----------------------------------------------------------------- helpers

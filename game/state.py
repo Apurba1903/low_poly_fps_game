@@ -80,6 +80,7 @@ class Player:
     pitch: float = 0.0
     crouch: bool = False
     weapon: int = RIFLE
+    aiming: bool = False
     hp: int = MAX_HP
     alive: bool = True
     kills: int = 0
@@ -318,6 +319,7 @@ class Game:
         p.yaw = _num(msg, "y", p.yaw)
         p.pitch = max(-1.55, min(1.55, _num(msg, "p", p.pitch)))
         p.weapon = KNIFE if msg.get("w") == KNIFE else RIFLE
+        p.aiming = bool(msg.get("a")) and p.weapon == RIFLE
         if not p.alive:
             return
         keys = int(msg.get("k", 0))
@@ -369,10 +371,22 @@ class Game:
         (ox, oy, oz), (dx, dy, dz), best_t, victim = self._trace(shooter, MAX_RANGE)
         hit_y = oy + dy * best_t
         hit_id = victim.pid if (victim and self.phase == "playing") else 0
+        screen_up = (
+            math.sin(shooter.yaw) * math.sin(shooter.pitch),
+            math.cos(shooter.pitch),
+            math.cos(shooter.yaw) * math.sin(shooter.pitch),
+        )
+        tracer_from = (
+            round(ox - screen_up[0] * 0.01, 2),
+            round(oy - screen_up[1] * 0.01, 2),
+            round(oz - screen_up[2] * 0.01, 2),
+        ) if shooter.aiming else [round(ox, 2), round(oy, 2), round(oz, 2)]
         self.events.append(
             {
                 "e": "shot",
                 "id": shooter.pid,
+                "a": shooter.aiming,
+                "from": tracer_from,
                 "to": [round(ox + dx * best_t, 2), round(hit_y, 2), round(oz + dz * best_t, 2)],
                 "hit": hit_id,
             }
