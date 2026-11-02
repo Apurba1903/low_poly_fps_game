@@ -13,7 +13,7 @@ const SENS = 0.0022;
 const TEAM_COLOR = { A: 0xff5c5c, B: 0x4da3ff };
 const TEAM_CSS = { A: "#ff5c5c", B: "#4da3ff" };
 const MINIMAP_SIZE = 200;       // px, longest side
-const SCOPE_FOV = 50;
+const SCOPE_FOV = 37.5;
 
 // ----------------------------------------------------------------- DOM
 const $ = (id) => document.getElementById(id);

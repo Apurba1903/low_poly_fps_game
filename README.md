@@ -93,7 +93,7 @@ curl -L -o static/three.module.min.js https://cdnjs.cloudflare.com/ajax/libs/thr
 | Jump | Space (high enough to get on top of a crate) |
 | Crouch | Hold C or Ctrl (slower, smaller target, can't jump; silent footsteps) |
 | Aim | Mouse (click the game once to capture the pointer; Esc releases it) |
-| 1.5× red dot sight | Hold right mouse button with the rifle equipped |
+| 2× red dot scope | Hold right mouse button with the rifle equipped |
 | Shoot / slash | Left click (hold for automatic fire) |
 | Weapon | 1 rifle · 2 knife · Q or mouse wheel to swap |
 | Reload | R |
