@@ -98,11 +98,17 @@ for p in players[2:]:
     p.x, p.z = ffa.world.width - 3, ffa.world.depth - 3
 ffa._update_sight(time.monotonic())
 assert b in ffa.visible_to(a), "FFA opponents in sight should be visible even on the same team"
-ffa.try_fire(a, time.monotonic())
+ffa.apply_input(a, {"s": 1, "y": 0.0, "p": 0.0, "w": 0, "a": True, "f": True, "dt": 0.0})
 assert b.hp == 63, "FFA must allow attacks against players assigned the same team"
+shot = ffa.events[-1]
+assert shot["a"] and list(shot["from"]) == [round(a.x, 2), round(a.y + 1.59, 2), round(a.z, 2)], shot
 b.hp = 25
 a.next_fire = 0
+a.aiming = False
 ffa.try_fire(a, time.monotonic())
+shot = next(e for e in reversed(ffa.events) if e["e"] == "shot")
+assert not shot["a"], shot
+assert list(shot["from"]) == [round(a.x, 2), round(a.y + 1.6, 2), round(a.z, 2)], shot
 assert not b.alive and a.kills == 1 and ffa.scores == {"A": 0, "B": 0}, (b.alive, a.kills, ffa.scores)
 print("free for all: 14-player cap, same-team combat, visibility, individual scoring ok")
 
